@@ -1,0 +1,342 @@
+# 📖 Diccionario de Medidas DAX: Sistema S&OP Automotriz
+
+## 📊 Bloque Comercial: KPIs Principales (YoY y Run-Rate)
+---
+
+### 📌 Indicadores Base de Año Actual y Año Anterior
+```dax
+0.1 Ventas AP = 
+// Fija el max year ignorando filtros de tiempo externos para anclar la vista actual (CY).
+VAR AnioPresente = CALCULATE(YEAR(MAX('3_0_Ventas_V3'[Fecha])), ALL('3_0_Ventas_V3'))
+
+RETURN
+CALCULATE(
+    SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+    'Calendario'[Año] = AnioPresente
+) + 0
+
+0.2 Ventas AA = 
+// Desplaza dinámicamente el ancla un año atrás para establecer la base comparativa (LY).
+VAR AnioPresente = CALCULATE(YEAR(MAX('3_0_Ventas_V3'[Fecha])), ALL('3_0_Ventas_V3'))
+VAR AnioAnterior = AnioPresente - 1
+
+RETURN
+CALCULATE(
+    SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+    'Calendario'[Año] = AnioAnterior
+) + 0
+
+💡 Racional de Negocio: Diseñé estas medidas calculando dinámicamente el último año con datos vivos en el fact table (ALL),
+   en lugar de usar funciones estáticas de Time Intelligence. Esto convierte al tablero en un producto "evergreen"
+   (cero mantenimiento en el cambio de año) y evita que los reportes se rompan si el calendario tiene gaps operativos.
+
+📌 Variación Comercial y Gaps
+
+0.3 Gap Ventas Unid = 
+// Delta absoluto YoY en unidades. Se suma 0 para evitar blanks en matrices visuales.
+VAR ResultadoGap = [0.1 Ventas AP] - [0.2 Ventas AA]
+RETURN
+ResultadoGap + 0
+
+0.4 Variacion % = 
+// Crecimiento YoY. Uso de DIVIDE para manejo seguro de errores (divisiones por cero).
+VAR Resultado = DIVIDE([0.3 Gap Ventas Unid], [0.2 Ventas AA], 0)
+RETURN
+Resultado + 0
+
+💡 Racional de Negocio: Cálculo del Delta de crecimiento. Estructurado con manejo de errores (DIVIDE) y control de nulos 
+   (+0) para asegurar que al cruzar estos KPIs por múltiples dimensiones en matrices (Marca, Segmento), el grid de Power BI se mantenga 
+   estable y legible para la dirección.
+
+📌 Promedio de Absorción de Mercado
+
+0.5 Promedio Mensual AP = 
+// Promedio de run-rate. Filtra meses sin movimiento para no sesgar el ritmo comercial.
+VAR Promedio = 
+    AVERAGEX(
+        FILTER(VALUES('Calendario'[Mes]), [0.1 Ventas AP] > 0),
+        [0.1 Ventas AP]
+    )
+RETURN
+COALESCE(Promedio, 0)
+
+💡 Racional de Negocio: Este es un indicador crítico para calcular el ritmo de ventas (run-rate). Utilicé AVERAGEX anidado con un FILTER para 
+   promediar exclusivamente los meses que ya reportan ventas. Esto previene que los meses futuros (aún en ceros) derrumben estadísticamente 
+   el indicador y afecten el pronóstico.
+
+📈 Bloque de Tendencias y Benchmarks (Run-Rate y Largo Plazo)
+📌 Velocidad Comercial y Aceleración
+
+0.6 Promedio Mensual AA = 
+// Calcula la línea base del run-rate histórico (Last Year) filtrando meses inactivos.
+VAR Promedio = 
+    AVERAGEX(
+        FILTER(VALUES('Calendario'[Mes]), [0.2 Ventas AA] > 0),
+        [0.2 Ventas AA]
+    )
+RETURN
+COALESCE(Promedio, 0)
+
+0.7 Gap Promedios = 
+// Delta absoluto de la velocidad de ventas (Run-Rate actual vs histórico).
+[0.5 Promedio Mensual AP] - [0.6 Promedio Mensual AA]
+
+0.8 % Gap Promedios = 
+// Variación relativa del ritmo comercial. Útil para ver si el mercado se está acelerando.
+VAR Resultado = DIVIDE([0.7 Gap Promedios], [0.6 Promedio Mensual AA], 0)
+RETURN
+Resultado + 0
+
+💡 Racional de Negocio: Comparar totales crudos suele esconder picos atípicos. Diseñé este set de medidas para evaluar el "Run-Rate" 
+   (velocidad de absorción del mercado). El delta entre promedios nos permite decirle a la Dirección si, en promedio mensual, estamos 
+   desplazando el inventario más rápido o más lento que el año anterior.
+
+📌 Benchmarks de Mercado: Histórico y Ciclo de 5 Años
+
+0.9 Promedio Historico Ventas Anual = 
+// Benchmark "All-Time". REMOVEFILTERS rompe el contexto de fecha actual para obtener 
+// el promedio mensual absoluto de todo el histórico de la base de datos.
+VAR PromHistorico = 
+    CALCULATE(
+        AVERAGEX(
+            FILTER(VALUES('Calendario'[Mes]), CALCULATE(SUM('3_0_Ventas_V3'[Unidades Vehiculares])) > 0),
+            CALCULATE(SUM('3_0_Ventas_V3'[Unidades Vehiculares]))
+        ),
+        REMOVEFILTERS('Calendario'[Date])
+    )
+RETURN
+COALESCE(PromHistorico, 0)
+
+1.0 Promedio Ventas 5 Anios = 
+// Define la ventana S&OP de mediano plazo (CY y 4 años atrás).
+VAR AnioPresente = CALCULATE(YEAR(MAX('3_0_Ventas_V3'[Fecha])), ALL('3_0_Ventas_V3'))
+VAR InicioPeriodo = AnioPresente - 4
+
+// Aisla el volumen total de ese lustro y calcula la media anual estabilizada.
+VAR TotalVentasPeriodo = 
+    CALCULATE(
+        SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+        'Calendario'[Año] >= InicioPeriodo,
+        'Calendario'[Año] <= AnioPresente
+    )
+    
+RETURN
+COALESCE(DIVIDE(TotalVentasPeriodo, 5, 0), 0)
+
+💡 Racional de Negocio: En planeación de demanda automotriz (S&OP), un solo año es insuficiente para ver el comportamiento real por ciclos económicos o pandemias. 
+   La medida Promedio Ventas 5 Anios encapsula dinámicamente el ciclo de planeación táctica estándar a mediano plazo, absorbiendo anomalías estadísticas.
+   Por su parte, la medida histórica utiliza un REMOVEFILTERS de tiempo para establecer el límite superior/inferior del comportamiento de la marca 
+   en México desde el origen de la base de datos.
+
+🔮 Bloque de Pronósticos y Planeación de Demanda (Forecasting Engine)
+📌 Modelos Estadísticos de Estacionalidad
+
+1.1 Estacionalidad Promedio Mensual = 
+// Fija el último año operativo (CY) para establecer el ancla temporal.
+VAR AnioMax = CALCULATE(MAX('3_0_Ventas_V3'[Año]), ALL('3_0_Ventas_V3'))
+
+// Suaviza la curva aislando la ventana móvil de los 5 años operativos anteriores.
+VAR VentasUltimos5Anios = 
+    CALCULATE(
+        SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+        'Calendario'[Año] >= AnioMax - 5 && 'Calendario'[Año] < AnioMax
+    )
+
+RETURN
+DIVIDE(VentasUltimos5Anios, 5, 0)
+
+1.5 Estacionalidad Promedio Mensual 3 Anios = 
+// Ventana móvil de estacionalidad corta. Ideal para detectar tendencias de mercado recientes.
+VAR AnioMax = CALCULATE(MAX('3_0_Ventas_V3'[Año]), ALL('3_0_Ventas_V3'))
+
+VAR VentasUltimos3Anios = 
+    CALCULATE(
+        SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+        'Calendario'[Año] >= AnioMax - 3 && 'Calendario'[Año] < AnioMax
+    )
+
+RETURN
+DIVIDE(VentasUltimos3Anios, 3, 0)
+
+💡 Racional de Negocio: El mercado automotriz tiene ciclos muy marcados. Desarrollé estas medidas para extraer la curva de demanda natural (baseline), 
+   promediando ventanas móviles de 3 y 5 años. Esto permite a la dirección elegir entre un pronóstico reactivo a tendencias recientes 
+   (3 años) o un modelo suavizado e histórico (5 años).
+
+📌 Motor de Simulador de Escenarios y Proyecciones
+
+1.2 Pronostico Simulado = 
+// Inyección del parámetro What-If (Escenarios) sobre la base estacional estadística.
+VAR EstacionalidadBase = [1.1 Estacionalidad Promedio Mensual]
+VAR PorcentajeSimulador = [Valor de Simulador Escenario %]
+
+RETURN
+EstacionalidadBase * (1 + PorcentajeSimulador)
+
+1.4 Linea de Tiempo Continua = 
+// Motor central del Forecast S&OP. Empalma datos reales (Actuals) con proyecciones.
+VAR UltimaFechaVentas = CALCULATE(MAX('3_0_Ventas_V3'[Fecha]), ALL('3_0_Ventas_V3'))
+VAR FechaGrafica = MAX('Calendario'[Date])
+
+// Captura de los criterios estadísticos y de estrés seleccionados por el usuario.
+VAR CriterioSel = SELECTEDVALUE('Filtro Pronostico'[Criterio], "Estacionalidad 5 Años")
+VAR Simulador = [Valor de Simulador Escenario %]
+VAR MesEnGrafica = MAX('Calendario'[MesNumero])
+
+RETURN
+IF(
+    FechaGrafica <= UltimaFechaVentas,
+    // [ACTUALS]: Lectura del volumen histórico consolidado.
+    CALCULATE(SUM('3_0_Ventas_V3'[Unidades Vehiculares])),
+    
+    // [FORECAST]: Aislamiento del contexto de filtro para proyectar estacionalidad futura.
+    VAR CalcEstacionalidad5 = CALCULATE([1.1 Estacionalidad Promedio Mensual], REMOVEFILTERS('Calendario'), 'Calendario'[MesNumero] = MesEnGrafica)
+    VAR CalcEstacionalidad3 = CALCULATE([1.5 Estacionalidad Promedio Mensual 3 Anios], REMOVEFILTERS('Calendario'), 'Calendario'[MesNumero] = MesEnGrafica)
+    VAR CalcPromedio12 = CALCULATE([1.6 Promedio Ultimos 12 Meses], REMOVEFILTERS('Calendario'))
+    
+    // [EVALUACIÓN DE ESCENARIOS]: Switch dinámico según el criterio del modelo predictivo.
+    RETURN
+    SWITCH(CriterioSel,
+        "Estacionalidad 5 Años", CalcEstacionalidad5 * (1 + Simulador),
+        "Estacionalidad 3 Años", CalcEstacionalidad3 * (1 + Simulador), 
+        "Promedio 12 Meses", CalcPromedio12 * (1 + Simulador),    
+        CalcEstacionalidad5 * (1 + Simulador)
+    )
+)
+
+💡 Racional de Negocio: Esta es la medida núcleo de la herramienta de S&OP. Funciona como un motor condicional (IF / SWITCH) que detecta la fecha actual en el modelo: 
+   si la fecha está en el pasado, grafica los datos de ventas reales (Actuals); si entra en el futuro, inyecta automáticamente el modelo estadístico seleccionado por el usuario. 
+   Además, se integra con un parámetro "What-If" (Simulador), permitiendo al comité directivo estresar el pronóstico (ej. ¿Qué pasa con el inventario si la demanda sube un 15%?).
+
+📌 Puntos de Inflexión del Mercado
+
+1.3 Variacion Estacional MoM = 
+// Identificación de puntos de inflexión mensuales (aceleración/contracción natural).
+VAR MesActual = MAX('Calendario'[MesNumero])
+VAR MesAnterior = IF(MesActual = 1, 12, MesActual - 1)
+
+VAR ValorActual = [1.1 Estacionalidad Promedio Mensual]
+
+// Ruptura del contexto de filtro visual para evaluar el delta contra el periodo t-1.
+VAR ValorAnterior = 
+    CALCULATE(
+        [1.1 Estacionalidad Promedio Mensual],
+        REMOVEFILTERS('Calendario'[MesNumero]),
+        'Calendario'[MesNumero] = MesAnterior
+    )
+
+RETURN
+DIVIDE(ValorActual - ValorAnterior, ValorAnterior, 0)
+
+💡 Racional de Negocio: Utilicé la función REMOVEFILTERS para evaluar la aceleración o contracción Month-over-Month (MoM) directa sobre la línea base. 
+   Esto le indica al equipo de logística y producción los meses exactos donde inicia la temporada alta de ventas para anticipar el abastecimiento.
+
+🎯 Bloque de Inteligencia Competitiva (Market Share & TAM)
+📌 Total Addressable Market (TAM / Rolling Year)
+
+2.1 Rolling Year Ventas (TAM) = 
+// Cálculo del Total Addressable Market (TAM) / Moving Annual Total.
+VAR UltimaFechaVentas = CALCULATE(MAX('3_0_Ventas_V3'[Fecha]), ALL('3_0_Ventas_V3'))
+VAR FechaActualGrafica = MAX('Calendario'[Date])
+
+// Limita el cálculo exclusivamente a datos históricos consolidados (Actuals) para evitar distorsiones en gráficas futuras.
+RETURN
+IF(
+    FechaActualGrafica > UltimaFechaVentas,
+    BLANK(), 
+    CALCULATE(
+        SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+        DATESINPERIOD(
+            'Calendario'[Date], 
+            FechaActualGrafica, 
+            -12, 
+            MONTH
+        )
+    )
+)
+
+💡 Racional de Negocio: El análisis mensual crudo tiene demasiado "ruido" estacional. Utilicé la función DATESINPERIOD para calcular el TAM (Mercado Total Direccionable) o "Rolling Year". 
+   Esto genera una línea de tendencia limpia que le indica a la dirección el tamaño real anualizado del mercado en cualquier punto del tiempo. 
+   Agregué una condición IF para detener el cálculo en el mes actual, manteniendo limpia la visualización.
+
+📌 Aislamiento del Total de Industria
+
+3.1 Ventas Totales Industria = 
+// Calcula el volumen total del mercado ignorando las selecciones del usuario.
+// Se usa REMOVEFILTERS en las dimensiones de producto para establecer el denominador universal.
+CALCULATE(
+    SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+    REMOVEFILTERS('Dim_Marca'), 
+    REMOVEFILTERS('Dim_Modelo'),
+    REMOVEFILTERS('Dim_Segmento'), 
+    REMOVEFILTERS('Dim_Tipo')      
+)
+
+💡 Racional de Negocio: Para calcular participaciones de mercado relativas, es obligatorio tener un total absoluto estático (el tamaño completo del pastel). 
+   Esta medida utiliza REMOVEFILTERS sobre todas las dimensiones de catálogo (Marca, Modelo, Tipo) para forzar a Power BI a calcular el volumen total del país, 
+   sin importar qué vehículo seleccione el usuario en los segmentadores.
+
+📌 Desempeño Competitivo: Market Share Actual vs Histórico
+
+3.3 Market Share % Año Anterior = 
+// Desplazamiento del cálculo de cuota de mercado al periodo análogo anterior (LY).
+CALCULATE(
+    [3.2 Market Share %],
+    SAMEPERIODLASTYEAR('Calendario'[Date])
+)
+
+3.4 Robo de Mercado (Delta MS) = 
+// Cuantificación de ganancia o pérdida neta de participación frente a la industria (Absorción competitiva).
+[3.2 Market Share %] - [3.3 Market Share % Año Anterior]
+
+💡 Racional de Negocio: Una marca puede estar vendiendo más unidades que el año pasado, pero perdiendo participación de mercado si la industria crece más rápido. 
+   Estas medidas calculan el Share % dinámico y lo comparan contra el ciclo anterior. El "Delta" exacto (Robo de Mercado) responde en comité a la pregunta crítica: 
+   "¿Estamos creciendo orgánicamente con el mercado, o le estamos robando clientes a la competencia?".
+
+⚙️ Bloque de Alineación S&OP (Producción vs Demanda)
+📌 Desplazamiento Nacional y Salidas Consolidadas
+
+4.1 Ventas Origen Nacional = 
+// Aisla el volumen de ventas proveniente exclusivamente de manufactura local (Domestic Sales) para balanceo S&OP.
+CALCULATE(
+    SUM('3_0_Ventas_V3'[Unidades Vehiculares]),
+    '3_0_Ventas_V3'[Origen] = "Nacional" 
+)
+
+4.2 Salidas Totales Planta = 
+// Demanda total consolidada (Mercado Interno + Exportaciones). Base para cruzar contra el ensamble total de producción.
+[4.1 Ventas Origen Nacional] + [1.1 Total Exportacion]
+
+💡 Racional de Negocio: Aquí ocurre la conexión entre Inteligencia Comercial y Supply Chain. Para saber si una planta de ensamble está balanceada, 
+   no podemos comparar la producción solo contra las ventas totales (ya que muchas ventas son de vehículos importados). Diseñé la medida Ventas 
+   Origen Nacional para aislar la demanda doméstica y, al sumarla con exportaciones, obtenemos las Salidas Totales Planta. Este es el volumen real 
+   que "jala" inventario de las fábricas en México, vital para el cálculo de requerimientos netos (Net Requirements).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
