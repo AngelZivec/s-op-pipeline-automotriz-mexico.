@@ -22,4 +22,4 @@ Transformar datos macroeconómicos crudos en un flujo automatizado que permita c
 * Visibilidad 360° en 3 ejes clave: Ventas, Producción y Exportaciones.
 
 ## 🔗 Enlaces
-* [Ver Portafolio Interactivo y Dashboard]([AQUI_PONES_EL_LINK_DE_TU_PAGINA_WEB](https://zivec-analyst.framer.website/))
+* [Ver Portafolio Interactivo y Dashboard](https://zivec-analyst.framer.website/)
